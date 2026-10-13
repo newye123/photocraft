@@ -1,0 +1,26 @@
+name: build-cli-windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-cli:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build CLI
+        run: cargo build --release --locked -p photocraft-cli
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-cli-win64
+          path: target/release/photocraft-cli.exe
+          if-no-files-found: error
