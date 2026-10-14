@@ -229,21 +229,65 @@ pub fn write(v: &Value) -> Vec<u8> {
 
 /// Serializes `/key value` pairs without an enclosing dictionary: the layout of the document's
 /// `Txt2` block (see [`crate::psd::build_txt2`]), which `parse_txt2` wraps in `<< >>` to parse.
+/// Single spaces separate tokens (Photoshop's own byte-exact layout); the parser skips
+/// whitespace either way, so this is a byte-layout choice, not a semantic one.
 pub fn write_bare(items: &[(String, Value)]) -> Vec<u8> {
-    let mut out = b"\n\n".to_vec();
+    let mut out = Vec::new();
     for (k, v) in items {
+        out.push(b' ');
         out.push(b'/');
         out.extend_from_slice(k.as_bytes());
-        if is_container(v) {
-            out.push(b'\n');
-            indent(&mut out, 1);
-        } else {
-            out.push(b' ');
-        }
-        write_value(v, 1, &mut out);
-        out.push(b'\n');
+        out.push(b' ');
+        write_value_c(v, &mut out);
     }
     out
+}
+
+fn write_value_c(v: &Value, out: &mut Vec<u8>) {
+    match v {
+        Value::Dict(items) => {
+            out.extend_from_slice(b"<<");
+            for (k, v) in items {
+                out.push(b' ');
+                out.push(b'/');
+                out.extend_from_slice(k.as_bytes());
+                out.push(b' ');
+                write_value_c(v, out);
+            }
+            out.extend_from_slice(b" >>");
+        }
+        Value::Array(items) => {
+            out.extend_from_slice(b"[");
+            for x in items {
+                out.push(b' ');
+                write_value_c(x, out);
+            }
+            out.extend_from_slice(b" ]");
+        }
+        Value::String(s) => {
+            out.push(b'(');
+            let mut raw = vec![0xFE, 0xFF];
+            for u in s.encode_utf16() {
+                raw.extend_from_slice(&u.to_be_bytes());
+            }
+            for c in raw {
+                if matches!(c, b'(' | b')' | b'\\') {
+                    out.push(b'\\');
+                }
+                out.push(c);
+            }
+            out.push(b')');
+        }
+        Value::Int(i) => {
+            let _ = write!(Wrap(out), "{i}");
+        }
+        Value::Real(r) => out.extend_from_slice(format_real(*r).as_bytes()),
+        Value::Bool(b) => out.extend_from_slice(if *b { b"true" } else { b"false" }),
+        Value::Name(n) => {
+            out.push(b'/');
+            out.extend_from_slice(n.as_bytes());
+        }
+    }
 }
 
 fn indent(out: &mut Vec<u8>, n: usize) {

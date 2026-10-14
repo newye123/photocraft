@@ -761,7 +761,7 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
         let mut object = kept.cloned().unwrap_or_else(E::dict);
         let mut model = object.get("0").cloned().filter(|m| matches!(m, E::Dict(_))).unwrap_or_else(E::dict);
         let file_runs = kept.and_then(|_| model.path(&["6", "0"]).and_then(E::as_array)).and_then(|runs| with_modes(runs, &modes));
-        let runs = file_runs.unwrap_or_else(|| {
+        let runs = file_runs.unwrap_or_else(|| respan_first_run(kept, &modes).unwrap_or_else(|| {
             modes
                 .iter()
                 .map(|&(mode, len)| {
@@ -771,7 +771,7 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
                     E::Dict(vec![("0".into(), E::Dict(vec![("0".into(), data)])), ("1".into(), E::Int(len as i64))])
                 })
                 .collect()
-        });
+        }));
         model.set("0", E::String(text));
         match model.get_mut("6") {
             Some(style_run @ E::Dict(_)) => style_run.set("0", E::Array(runs)),
@@ -803,6 +803,22 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
         // Unreachable: `parse_txt2` and the fallback above both yield a dictionary.
         _ => ed::write_bare(&[]),
     }
+}
+
+/// The kept object's first run, cloned with its character count reset to the whole text: the
+/// file's run keys (`/1` font size, `/11`, `/14`, `/53` SimplePaint, …) survive the edit even
+/// when the runs' spans no longer line up with the new text. `None` when the object holds no
+/// run with a style dictionary — the caller writes a minimal one. Photoshop's runs sum their
+/// `/1` counts over the text, so the single span covers all of it.
+fn respan_first_run(object: Option<&E>, modes: &[(i64, usize)]) -> Option<Vec<E>> {
+    let runs = object?.path(&["0", "6", "0"]).and_then(E::as_array)?;
+    let mut first = runs.first()?.clone();
+    if !matches!(first, E::Dict(_)) || first.path(&["0", "0", "6"]).is_none() {
+        return None;
+    }
+    let total: i64 = modes.iter().try_fold(0i64, |a, m| a.checked_add(m.1 as i64))?;
+    first.set("1", E::Int(total));
+    Some(vec![first])
 }
 
 /// The file's own `Txt2` style runs `runs` with the auto-kern modes `modes` (`(mode, UTF-16
